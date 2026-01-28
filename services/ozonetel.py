@@ -110,19 +110,26 @@ class OzonetelService:
             XML response string
         """
         try:
-            # Use hardcoded WebSocket URL (same as your working version)
+            # Use the exact WebSocket URL format that works
             ws_url = f'ws://43.205.216.106:8000/ws?ucid={ucid}&cid={caller_id}'
             
-            # Generate XML response to connect to WebSocket (same format as working version)
+            # Generate XML response with exact format that should work
             response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <response>
     <start-record/>
-    <stream is_sip='true' url='{ws_url}'>516473</stream>
+    <stream is_sip='true' url='{ws_url}'>{self.sip_number}</stream>
 </response>"""
             
             log.info(f"🔗 Generated webhook response for {ucid} -> {ws_url}")
-            log.info(f"📋 XML Response: {response_xml}")
-            log.info(f"🔧 SIP Number configured: {self.sip_number}")
+            log.info(f"📋 XML Response (formatted):")
+            log.info(f"   <?xml version=\"1.0\" encoding=\"UTF-8\"?>")
+            log.info(f"   <response>")
+            log.info(f"       <start-record/>")
+            log.info(f"       <stream is_sip='true' url='{ws_url}'>{self.sip_number}</stream>")
+            log.info(f"   </response>")
+            log.info(f"🔧 SIP Number: {self.sip_number}")
+            log.info(f"🌐 WebSocket URL: {ws_url}")
+            
             return response_xml
             
         except Exception as e:

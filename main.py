@@ -85,7 +85,30 @@ async def test_websocket():
         "status": "WebSocket endpoint available",
         "websocket_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws",
         "test_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws?ucid=test&cid=test",
-        "message": "Use a WebSocket client to test connection to the URL above"
+        "message": "Use a WebSocket client to test connection to the URL above",
+        "server_info": {
+            "host": Config.SERVER_HOST,
+            "port": Config.SERVER_PORT,
+            "webhook_endpoint": Config.WEBHOOK_ENDPOINT
+        }
+    }
+
+@app.get("/test-connection")
+async def test_connection():
+    """Test if the server is accessible from external sources"""
+    return {
+        "status": "Server is accessible",
+        "timestamp": "2026-01-28T19:00:00Z",
+        "server": {
+            "host": Config.SERVER_HOST,
+            "port": Config.SERVER_PORT,
+            "webhook_endpoint": Config.WEBHOOK_ENDPOINT
+        },
+        "websocket": {
+            "endpoint": "/ws",
+            "full_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws",
+            "test_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws?ucid=test123&cid=+1234567890"
+        }
     }
 
 @app.websocket("/ws")
@@ -98,6 +121,11 @@ async def websocket_endpoint(
     WebSocket endpoint for real-time voice processing
     """
     log.info(f"🚨 WEBSOCKET ENDPOINT HIT! UCID: {ucid}, CID: {cid}")
+    log.info(f"🔍 WebSocket connection details:")
+    log.info(f"   - Client: {websocket.client}")
+    log.info(f"   - Headers: {dict(websocket.headers)}")
+    log.info(f"   - Query params: ucid={ucid}, cid={cid}")
+    
     await webhook_handler.handle_websocket_connection(websocket, ucid, cid)
 
 @app.get("/stats")

@@ -256,6 +256,12 @@ class SarvamSTTService:
         # Run async event loop
         asyncio.run(self._run_stream_async())
     
+    def process_audio_stream(self, audio_queue: queue.Queue, result_queue: queue.Queue, ucid: str):
+        """
+        Process audio stream for a specific call (compatibility method)
+        """
+        self.run_stream(audio_queue, result_queue, ucid)
+    
     async def _run_stream_async(self):
         """Async implementation of streaming STT"""
         try:

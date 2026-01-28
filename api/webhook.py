@@ -89,66 +89,78 @@ class WebhookHandler:
     
     async def handle_websocket_connection(self, websocket: WebSocket, ucid: str = None, cid: str = None):
         """
-        Handle WebSocket connection for real-time voice processing - SIMPLIFIED FOR DEBUGGING
+        Handle WebSocket connection for real-time voice processing
+        Simplified version matching working implementation structure
         """
         if not ucid:
             ucid = str(id(websocket))
         
+        log.info(f"🚨 WEBSOCKET ENDPOINT HIT! UCID: {ucid}, CID: {cid}")
         log.info(f"🎙️ WebSocket connection attempt - UCID: {ucid}, Caller: {cid}")
         
         try:
-            # Accept WebSocket connection
+            # Accept WebSocket connection immediately
             await websocket.accept()
             log.info(f"✅ WebSocket accepted successfully - UCID: {ucid}")
             
-            # Send immediate confirmation to Ozonetel
+            # Initialize services for this call
+            stt_service = SarvamSTTService()
+            tts_service = SarvamTTSService()
+            conversation_agent = ParcelTrackingAgent()
+            conversation_state = ConversationState()
+            
+            # Create audio processing queue
+            audio_queue = queue.Queue()
+            result_queue = queue.Queue()
+            
+            # Start STT processing thread
+            stt_thread = threading.Thread(
+                target=stt_service.run_stream,
+                args=(audio_queue, result_queue, ucid),
+                daemon=True
+            )
+            stt_thread.start()
+            log.info(f"🎧 Started STT processing thread for {ucid}")
+            
+            # Send initial greeting
+            greeting = conversation_agent.generate_greeting_response()
+            log.info(f"🤖 Sending greeting: {greeting}")
+            
             try:
-                await websocket.send_text(json.dumps({
-                    "type": "connection_established",
-                    "ucid": ucid,
-                    "status": "ready"
-                }))
-                log.info(f"📡 Sent connection confirmation for {ucid}")
+                await tts_service.speak_with_interruption(websocket, greeting, ucid)
             except Exception as e:
-                log.warning(f"⚠️ Could not send connection confirmation: {e}")
+                log.warning(f"⚠️ Could not send greeting: {e}")
             
-            # Keep connection alive for testing
-            log.info(f"🔄 Keeping WebSocket connection alive for {ucid}")
+            # Start concurrent tasks
+            audio_task = asyncio.create_task(
+                self._handle_audio_stream(websocket, audio_queue, ucid)
+            )
             
-            # Simple message loop to keep connection alive
-            while True:
+            speech_task = asyncio.create_task(
+                self._process_customer_speech(
+                    result_queue, stt_service, tts_service, conversation_agent,
+                    conversation_state, websocket, ucid, stt_thread
+                )
+            )
+            
+            # Wait for either task to complete
+            done, pending = await asyncio.wait(
+                [audio_task, speech_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            # Cancel remaining tasks
+            for task in pending:
+                task.cancel()
                 try:
-                    data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
-                    log.info(f"📥 Received data from Ozonetel for {ucid}: {str(data)[:100]}...")
-                    
-                    if 'text' in data:
-                        text_data = data['text']
-                        try:
-                            json_data = json.loads(text_data)
-                            if json_data.get('event') == 'stop':
-                                log.info(f"📴 Received stop event for {ucid}")
-                                break
-                            elif json_data.get('event') == 'start':
-                                log.info(f"📞 Received start event for {ucid}")
-                        except json.JSONDecodeError:
-                            pass
-                    
-                except asyncio.TimeoutError:
-                    log.info(f"⏰ WebSocket timeout for {ucid} - sending ping")
-                    try:
-                        await websocket.ping()
-                    except:
-                        log.error(f"❌ WebSocket ping failed for {ucid}")
-                        break
-                        
-                except WebSocketDisconnect:
-                    log.info(f"📴 WebSocket disconnected for {ucid}")
-                    break
-                    
-                except Exception as e:
-                    log.error(f"❌ WebSocket error for {ucid}: {e}")
-                    break
+                    await task
+                except asyncio.CancelledError:
+                    pass
             
+            log.info(f"🏁 WebSocket tasks completed for {ucid}")
+            
+        except WebSocketDisconnect:
+            log.info(f"📴 WebSocket disconnected for {ucid}")
         except Exception as e:
             log.error(f"❌ WebSocket connection failed for {ucid}: {e}")
             try:
@@ -156,6 +168,11 @@ class WebhookHandler:
             except:
                 pass
         finally:
+            # Cleanup
+            try:
+                await self._cleanup_call(ucid, stt_thread if 'stt_thread' in locals() else None)
+            except:
+                pass
             log.info(f"🧹 WebSocket connection ended for {ucid}")
     
     async def _handle_audio_stream(self, websocket: WebSocket, audio_queue: queue.Queue, ucid: str):
@@ -329,34 +346,44 @@ class WebhookHandler:
             log.error(f"Error generating response: {e}")
             return "I'm sorry, I'm having trouble right now. Could you try again?"
     
-    async def _cleanup_call(self, ucid: str, stt_thread: threading.Thread):
+    async def _cleanup_call(self, ucid: str, stt_thread: threading.Thread = None):
         """Cleanup call resources"""
         try:
             log.info(f"🧹 Cleaning up call {ucid}")
             
-            # Terminate call via Ozonetel
-            try:
-                caller_phone = self.active_calls.get(ucid, {}).get('caller_id')
-                await self.ozonetel_service.hangup_call(ucid, caller_phone)
-            except Exception as e:
-                log.warning(f"⚠️ Error terminating call {ucid}: {e}")
-            
-            # Wait for STT thread
-            if stt_thread.is_alive():
-                stt_thread.join(timeout=5.0)
+            # Wait for STT thread if it exists
+            if stt_thread and stt_thread.is_alive():
+                try:
+                    stt_thread.join(timeout=5.0)
+                    log.info(f"✅ STT thread cleaned up for {ucid}")
+                except Exception as e:
+                    log.warning(f"⚠️ Error waiting for STT thread: {e}")
             
             # Update call session
             if ucid in self.active_calls:
                 self.active_calls[ucid]['status'] = 'completed'
                 self.active_calls[ucid]['end_time'] = datetime.now().isoformat()
+                log.info(f"📝 Updated call session for {ucid}")
             
             # Cleanup interruption handler
-            interruption_manager.end_call(ucid)
+            try:
+                interruption_manager.end_call(ucid)
+                log.info(f"🚨 Interruption handler cleaned up for {ucid}")
+            except Exception as e:
+                log.warning(f"⚠️ Error cleaning up interruption handler: {e}")
+            
+            # Try to terminate call via Ozonetel (optional)
+            try:
+                caller_phone = self.active_calls.get(ucid, {}).get('caller_id')
+                if caller_phone:
+                    await self.ozonetel_service.hangup_call(ucid, caller_phone)
+            except Exception as e:
+                log.warning(f"⚠️ Error terminating call {ucid}: {e}")
             
             log.info(f"✅ Cleanup completed for {ucid}")
         
         except Exception as e:
-            log.error(f"Error in cleanup: {e}")
+            log.error(f"❌ Error in cleanup for {ucid}: {e}")
     
     def get_stats(self) -> Dict:
         """Get call statistics"""
