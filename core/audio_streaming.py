@@ -69,7 +69,7 @@ class AudioStreamer:
                 }
                 
                 try:
-                    await websocket.send(json.dumps(audio_message))
+                    await websocket.send_text(json.dumps(audio_message))
                     sent_chunks += 1
                     
                     # Small delay for interruption responsiveness
