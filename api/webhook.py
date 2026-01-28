@@ -1,14 +1,24 @@
-"""IVR Bot API - Simplified Version
-Handles inbound calls with minimal complexity to avoid disconnections"""
+"""Parcel Tracking Voice Agent API
+Handles inbound calls for parcel tracking inquiries"""
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
 from datetime import datetime
 import logging
 import asyncio
+import queue
+import threading
 import json
 import os
 from typing import Dict, Optional
+
+# Import services
+from services.sarvam_stt import SarvamSTTService
+from services.sarvam_tts import SarvamTTSService
+from services.conversation import ParcelTrackingAgent
+from services.ozonetel import OzonetelService
+from core.interruption import interruption_manager
+from core.audio_streaming import AudioStreamer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -110,7 +120,7 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
     
     # Initialize services with error handling
     try:
-        log.info("� Initializing STnT service...")
+        log.info("🔧 Initializing STT service...")
         stt_service = SarvamSTTService()
         log.info("✅ STT service initialized")
     except Exception as e:
@@ -119,7 +129,7 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
         return
     
     try:
-        log.info("� Initializing TTS service...")
+        log.info("🔧 Initializing TTS service...")
         tts_service = SarvamTTSService()
         log.info("✅ TTS service initialized")
     except Exception as e:
