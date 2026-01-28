@@ -94,21 +94,37 @@ class WebhookHandler:
         if not ucid:
             ucid = str(id(websocket))
         
-        log.info(f"🎙️ WebSocket connection - UCID: {ucid}, Caller: {cid}")
+        log.info(f"🎙️ WebSocket connection attempt - UCID: {ucid}, Caller: {cid}")
         
         try:
+            # Accept WebSocket connection
             await websocket.accept()
-            log.info(f"✅ WebSocket accepted - UCID: {ucid}")
+            log.info(f"✅ WebSocket accepted successfully - UCID: {ucid}")
+            
+            # Send immediate confirmation to Ozonetel
+            try:
+                await websocket.send_text(json.dumps({
+                    "type": "connection_established",
+                    "ucid": ucid,
+                    "status": "ready"
+                }))
+                log.info(f"📡 Sent connection confirmation for {ucid}")
+            except Exception as e:
+                log.warning(f"⚠️ Could not send connection confirmation: {e}")
             
             # Initialize call tracking
             call_state = interruption_manager.start_call(ucid)
             
-            # Initialize services
-            stt_service = SarvamSTTService()
-            tts_service = SarvamTTSService()
-            conversation_agent = ParcelTrackingAgent()
-            
-            log.info("✅ All services initialized successfully")
+            # Initialize services with error handling
+            try:
+                stt_service = SarvamSTTService()
+                tts_service = SarvamTTSService()
+                conversation_agent = ParcelTrackingAgent()
+                log.info("✅ All services initialized successfully")
+            except Exception as e:
+                log.error(f"❌ Service initialization failed: {e}")
+                await websocket.close(code=1011, reason="Service initialization failed")
+                return
             
             # Setup processing queues
             audio_queue = queue.Queue()
@@ -117,24 +133,28 @@ class WebhookHandler:
             # Start STT service in background thread
             stt_thread = threading.Thread(
                 target=stt_service.run_stream,
-                args=(audio_queue, result_queue, ucid)
+                args=(audio_queue, result_queue, ucid),
+                daemon=True
             )
             stt_thread.start()
+            log.info(f"🎯 STT thread started for {ucid}")
             
             # Initialize conversation state
             conversation_state = ConversationState()
             
-            # Send initial greeting
+            # Send initial greeting with retry logic
             greeting_message = conversation_agent.generate_greeting_response()
             
             try:
                 success = await tts_service.speak_with_interruption(websocket, greeting_message, ucid)
-                if not success:
-                    log.warning("Greeting was interrupted or failed")
+                if success:
+                    log.info(f"✅ Greeting sent successfully for {ucid}")
+                else:
+                    log.warning(f"⚠️ Greeting was interrupted or failed for {ucid}")
             except Exception as e:
-                log.error(f"Error sending greeting: {e}")
+                log.error(f"❌ Error sending greeting for {ucid}: {e}")
             
-            # Start speech processing
+            # Start speech processing task
             speech_task = asyncio.create_task(
                 self._process_customer_speech(
                     result_queue, stt_service, tts_service, conversation_agent, 
@@ -142,45 +162,56 @@ class WebhookHandler:
                 )
             )
             
-            # Handle incoming audio data
+            # Handle incoming audio data with improved error handling
             await self._handle_audio_stream(websocket, audio_queue, ucid)
             
         except WebSocketDisconnect:
-            log.info(f"📴 WebSocket disconnected - UCID: {ucid}")
+            log.info(f"📴 WebSocket disconnected normally - UCID: {ucid}")
         except Exception as e:
-            log.error(f"❌ WebSocket error: {e}")
+            log.error(f"❌ WebSocket error for {ucid}: {e}")
+            try:
+                await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+            except:
+                pass
         finally:
             # Cleanup
-            await self._cleanup_call(ucid, stt_thread)
+            await self._cleanup_call(ucid, locals().get('stt_thread'))
     
     async def _handle_audio_stream(self, websocket: WebSocket, audio_queue: queue.Queue, ucid: str):
-        """Handle incoming audio stream from Ozonetel"""
+        """Handle incoming audio stream from Ozonetel with improved error handling"""
         try:
+            log.info(f"🎧 Starting audio stream handler for {ucid}")
+            
             while True:
-                data = await websocket.receive()
-                
-                if 'text' in data:
-                    text_data = data['text']
+                try:
+                    # Wait for data with timeout to prevent hanging
+                    data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
                     
-                    try:
-                        json_data = json.loads(text_data)
+                    if 'text' in data:
+                        text_data = data['text']
                         
-                        if json_data.get('event') == 'stop':
-                            log.info(f"📴 Call ended - UCID: {ucid}")
-                            break
-                        elif json_data.get('event') == 'start':
-                            log.info(f"📞 Call started - UCID: {ucid}")
-                            continue
-                    except json.JSONDecodeError:
-                        pass
-                    
-                    # Send audio data to STT
-                    try:
-                        parsed_data = json.loads(text_data)
-                        if parsed_data.get('type') == 'media':
+                        # Handle JSON control messages
+                        try:
+                            json_data = json.loads(text_data)
+                            
+                            if json_data.get('event') == 'stop':
+                                log.info(f"📴 Received stop event for {ucid}")
+                                break
+                            elif json_data.get('event') == 'start':
+                                log.info(f"📞 Received start event for {ucid}")
+                                continue
+                            elif json_data.get('type') == 'media':
+                                # This is audio data
+                                audio_queue.put(text_data)
+                                continue
+                                
+                        except json.JSONDecodeError:
+                            # Not JSON, treat as raw audio data
                             audio_queue.put(text_data)
-                    except json.JSONDecodeError:
-                        audio_queue.put(text_data)
+                    
+                    elif 'bytes' in data:
+                        # Handle binary audio data
+                        audio_queue.put(data['bytes'])
                     
                     # Check for interruption
                     if interruption_manager.is_interrupted(ucid):
@@ -192,9 +223,30 @@ class WebhookHandler:
                             await self.ozonetel_service.stop_audio_playback(ucid)
                         except Exception as e:
                             log.error(f"Error stopping Ozonetel audio: {e}")
+                
+                except asyncio.TimeoutError:
+                    log.warning(f"⏰ Audio stream timeout for {ucid} - checking connection")
+                    # Send ping to check if connection is still alive
+                    try:
+                        await websocket.ping()
+                        continue
+                    except:
+                        log.error(f"❌ WebSocket connection lost for {ucid}")
+                        break
+                        
+                except WebSocketDisconnect:
+                    log.info(f"📴 WebSocket disconnected during audio stream for {ucid}")
+                    break
+                    
+                except Exception as e:
+                    log.error(f"❌ Error in audio stream for {ucid}: {e}")
+                    # Don't break on individual errors, continue processing
+                    continue
         
         except Exception as e:
-            log.error(f"Error handling audio stream: {e}")
+            log.error(f"❌ Fatal error in audio stream handler for {ucid}: {e}")
+        finally:
+            log.info(f"🔚 Audio stream handler ended for {ucid}")
     
     async def _process_customer_speech(
         self, result_queue, stt_service, tts_service, conversation_agent, 

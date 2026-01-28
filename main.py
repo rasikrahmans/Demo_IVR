@@ -78,6 +78,16 @@ async def inbound_hook(
         called_number=called_number
     )
 
+@app.get("/test-ws")
+async def test_websocket():
+    """Test WebSocket endpoint accessibility"""
+    return {
+        "status": "WebSocket endpoint available",
+        "websocket_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws",
+        "test_url": f"ws://{Config.WEBHOOK_ENDPOINT}/ws?ucid=test&cid=test",
+        "message": "Use a WebSocket client to test connection to the URL above"
+    }
+
 @app.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,

@@ -39,15 +39,42 @@ class Config:
     
     @classmethod
     def validate(cls):
-        """Validate required configuration"""
+        """Validate required configuration with detailed error messages"""
         required = [
             'SARVAM_API_KEY',
             'OZONETEL_API_KEY',
             'WEBHOOK_ENDPOINT'
         ]
         
-        missing = [key for key in required if not getattr(cls, key)]
+        missing = []
+        invalid = []
+        
+        for key in required:
+            value = getattr(cls, key)
+            if not value:
+                missing.append(key)
+            elif key == 'WEBHOOK_ENDPOINT':
+                # Validate webhook endpoint format
+                if not value.replace('http://', '').replace('https://', ''):
+                    invalid.append(f"{key}: Invalid format - should be 'host:port' or 'http://host:port'")
+        
+        errors = []
         if missing:
-            raise ValueError(f"Missing required configuration: {', '.join(missing)}")
+            errors.append(f"Missing required configuration: {', '.join(missing)}")
+        if invalid:
+            errors.extend(invalid)
+            
+        if errors:
+            error_msg = "\n".join(errors)
+            error_msg += "\n\nPlease check your .env file and ensure all required values are set."
+            raise ValueError(error_msg)
+        
+        # Log successful validation
+        import logging
+        log = logging.getLogger(__name__)
+        log.info("✅ Configuration validation passed")
+        log.info(f"📡 Webhook endpoint: {cls.WEBHOOK_ENDPOINT}")
+        log.info(f"🔑 Sarvam API configured: {'Yes' if cls.SARVAM_API_KEY else 'No'}")
+        log.info(f"📞 Ozonetel API configured: {'Yes' if cls.OZONETEL_API_KEY else 'No'}")
         
         return True
