@@ -89,7 +89,7 @@ class WebhookHandler:
     
     async def handle_websocket_connection(self, websocket: WebSocket, ucid: str = None, cid: str = None):
         """
-        Handle WebSocket connection for real-time voice processing
+        Handle WebSocket connection for real-time voice processing - SIMPLIFIED FOR DEBUGGING
         """
         if not ucid:
             ucid = str(id(websocket))
@@ -112,70 +112,51 @@ class WebhookHandler:
             except Exception as e:
                 log.warning(f"⚠️ Could not send connection confirmation: {e}")
             
-            # Initialize call tracking
-            call_state = interruption_manager.start_call(ucid)
+            # Keep connection alive for testing
+            log.info(f"🔄 Keeping WebSocket connection alive for {ucid}")
             
-            # Initialize services with error handling
-            try:
-                stt_service = SarvamSTTService()
-                tts_service = SarvamTTSService()
-                conversation_agent = ParcelTrackingAgent()
-                log.info("✅ All services initialized successfully")
-            except Exception as e:
-                log.error(f"❌ Service initialization failed: {e}")
-                await websocket.close(code=1011, reason="Service initialization failed")
-                return
+            # Simple message loop to keep connection alive
+            while True:
+                try:
+                    data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+                    log.info(f"📥 Received data from Ozonetel for {ucid}: {str(data)[:100]}...")
+                    
+                    if 'text' in data:
+                        text_data = data['text']
+                        try:
+                            json_data = json.loads(text_data)
+                            if json_data.get('event') == 'stop':
+                                log.info(f"📴 Received stop event for {ucid}")
+                                break
+                            elif json_data.get('event') == 'start':
+                                log.info(f"📞 Received start event for {ucid}")
+                        except json.JSONDecodeError:
+                            pass
+                    
+                except asyncio.TimeoutError:
+                    log.info(f"⏰ WebSocket timeout for {ucid} - sending ping")
+                    try:
+                        await websocket.ping()
+                    except:
+                        log.error(f"❌ WebSocket ping failed for {ucid}")
+                        break
+                        
+                except WebSocketDisconnect:
+                    log.info(f"📴 WebSocket disconnected for {ucid}")
+                    break
+                    
+                except Exception as e:
+                    log.error(f"❌ WebSocket error for {ucid}: {e}")
+                    break
             
-            # Setup processing queues
-            audio_queue = queue.Queue()
-            result_queue = queue.Queue()
-            
-            # Start STT service in background thread
-            stt_thread = threading.Thread(
-                target=stt_service.run_stream,
-                args=(audio_queue, result_queue, ucid),
-                daemon=True
-            )
-            stt_thread.start()
-            log.info(f"🎯 STT thread started for {ucid}")
-            
-            # Initialize conversation state
-            conversation_state = ConversationState()
-            
-            # Send initial greeting with retry logic
-            greeting_message = conversation_agent.generate_greeting_response()
-            
-            try:
-                success = await tts_service.speak_with_interruption(websocket, greeting_message, ucid)
-                if success:
-                    log.info(f"✅ Greeting sent successfully for {ucid}")
-                else:
-                    log.warning(f"⚠️ Greeting was interrupted or failed for {ucid}")
-            except Exception as e:
-                log.error(f"❌ Error sending greeting for {ucid}: {e}")
-            
-            # Start speech processing task
-            speech_task = asyncio.create_task(
-                self._process_customer_speech(
-                    result_queue, stt_service, tts_service, conversation_agent, 
-                    conversation_state, websocket, ucid, stt_thread
-                )
-            )
-            
-            # Handle incoming audio data with improved error handling
-            await self._handle_audio_stream(websocket, audio_queue, ucid)
-            
-        except WebSocketDisconnect:
-            log.info(f"📴 WebSocket disconnected normally - UCID: {ucid}")
         except Exception as e:
-            log.error(f"❌ WebSocket error for {ucid}: {e}")
+            log.error(f"❌ WebSocket connection failed for {ucid}: {e}")
             try:
                 await websocket.close(code=1011, reason=f"Server error: {str(e)}")
             except:
                 pass
         finally:
-            # Cleanup
-            await self._cleanup_call(ucid, locals().get('stt_thread'))
+            log.info(f"🧹 WebSocket connection ended for {ucid}")
     
     async def _handle_audio_stream(self, websocket: WebSocket, audio_queue: queue.Queue, ucid: str):
         """Handle incoming audio stream from Ozonetel with improved error handling"""
