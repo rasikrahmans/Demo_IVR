@@ -28,7 +28,7 @@ async def test_websocket_connection():
         log.info(f"🔍 Testing WebSocket connection to: {url}")
         
         try:
-            async with websockets.connect(url, timeout=10) as websocket:
+            async with websockets.connect(url) as websocket:
                 log.info(f"✅ Successfully connected to {url}")
                 
                 # Send a test message

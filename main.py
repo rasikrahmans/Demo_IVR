@@ -97,6 +97,7 @@ async def websocket_endpoint(
     """
     WebSocket endpoint for real-time voice processing
     """
+    log.info(f"🚨 WEBSOCKET ENDPOINT HIT! UCID: {ucid}, CID: {cid}")
     await webhook_handler.handle_websocket_connection(websocket, ucid, cid)
 
 @app.get("/stats")

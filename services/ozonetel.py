@@ -110,28 +110,19 @@ class OzonetelService:
             XML response string
         """
         try:
-            # Build WebSocket URL for this call - ensure proper format
-            webhook_host = Config.WEBHOOK_ENDPOINT
-            if not webhook_host:
-                log.error("❌ WEBHOOK_ENDPOINT not configured!")
-                return "<response></response>"
+            # Use hardcoded WebSocket URL (same as your working version)
+            ws_url = f'ws://43.205.216.106:8000/ws?ucid={ucid}&cid={caller_id}'
             
-            # Remove protocol if present and ensure proper format
-            if webhook_host.startswith('http://'):
-                webhook_host = webhook_host[7:]
-            elif webhook_host.startswith('https://'):
-                webhook_host = webhook_host[8:]
-            
-            ws_url = f'ws://{webhook_host}/ws?ucid={ucid}&cid={caller_id}'
-            
-            # Generate XML response to connect to WebSocket
+            # Generate XML response to connect to WebSocket (same format as working version)
             response_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <response>
     <start-record/>
-    <stream is_sip='true' url='{ws_url}'>{self.sip_number or ''}</stream>
+    <stream is_sip='true' url='{ws_url}'>516473</stream>
 </response>"""
             
             log.info(f"🔗 Generated webhook response for {ucid} -> {ws_url}")
+            log.info(f"📋 XML Response: {response_xml}")
+            log.info(f"🔧 SIP Number configured: {self.sip_number}")
             return response_xml
             
         except Exception as e:
