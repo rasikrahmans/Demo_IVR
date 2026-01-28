@@ -59,7 +59,7 @@ class SarvamSTTService:
                     self.total_audio_packets += 1
                     
                     # For demo purposes, occasionally generate fake transcripts
-                    if self.total_audio_packets % 50 == 0:  # Every 50 packets
+                    if self.total_audio_packets % 200 == 0:  # Every 200 packets instead of 50
                         fake_transcript = {
                             'transcript': 'Hello, I want to track my package',
                             'confidence': 0.85,
@@ -67,7 +67,6 @@ class SarvamSTTService:
                             'provider': 'sarvam_demo'
                         }
                         self.result_queue.put(fake_transcript)
-                        log.info(f"📝 Demo transcript generated: '{fake_transcript['transcript']}'")
                     
                 except queue.Empty:
                     continue

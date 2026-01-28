@@ -35,7 +35,6 @@ class SarvamTTSService:
             Audio bytes in WAV format or None if failed
         """
         if not self.enabled:
-            log.info(f"Simulating TTS for: '{text[:50]}...'")
             # Return empty audio bytes for simulation
             return self._generate_silence(len(text.split()) * 0.5)
         

@@ -235,7 +235,6 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
                 
                 # Analyze customer input
                 analysis = conversation_agent.analyze_customer_input(transcript, conversation_state)
-                log.info(f"🧠 Analysis: {analysis}")
                 
                 # Generate response based on analysis
                 response_text = await handle_customer_intent(analysis, conversation_state, transcript)
@@ -340,8 +339,6 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
     async def send_agent_response(response_text: str):
         """Send agent response with interruption handling"""
         try:
-            log.info(f"🤖 Agent responding: '{response_text[:60]}...'")
-            
             interruption_manager.set_agent_speaking(ucid, True, "speaking_response")
             
             # Generate and send response audio
@@ -376,8 +373,9 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
                         if not hasattr(websocket_endpoint, '_media_count'):
                             websocket_endpoint._media_count = 0
                         websocket_endpoint._media_count += 1
-                        if websocket_endpoint._media_count % 100 == 1:
-                            log.info(f"📋 Media packet #{websocket_endpoint._media_count}: {len(json_data.get('data', {}).get('samples', []))} samples")
+                        # Only log every 500th packet instead of every 100th
+                        if websocket_endpoint._media_count % 500 == 1:
+                            log.info(f"📋 Media packet #{websocket_endpoint._media_count}")
                     else:
                         log.info(f"📋 Non-media packet: type={json_data.get('type', 'unknown')}")
                     

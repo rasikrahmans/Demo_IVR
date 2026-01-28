@@ -47,8 +47,6 @@ class AudioStreamer:
             total_chunks = (len(raw_audio) + CHUNK_SIZE - 1) // CHUNK_SIZE
             sent_chunks = 0
             
-            log.info(f"🎵 Streaming {len(raw_audio)} bytes in {total_chunks} chunks for {ucid}")
-            
             # Set agent speaking state
             interruption_manager.set_agent_speaking(ucid, True, "audio_streaming_started")
             
@@ -78,8 +76,6 @@ class AudioStreamer:
                 except Exception as e:
                     log.error(f"Error sending audio chunk {sent_chunks+1}: {e}")
                     return False
-            
-            log.info(f"✅ Audio streaming completed: {sent_chunks}/{total_chunks} chunks for {ucid}")
             return True
             
         except Exception as e:
