@@ -34,26 +34,46 @@ async def test_websocket():
         print("✅ CONNECTION SUCCESSFUL!")
         print(f"📡 Connected to: {test_url}")
         
-        # Send a test message
-        test_message = {
-            "type": "test",
-            "message": "Hello from test script",
-            "ucid": "test123"
+        # Send a start event like Ozonetel would
+        start_message = {
+            "event": "start",
+            "ucid": "test123",
+            "cid": "+1234567890"
         }
         
-        await websocket.send(json.dumps(test_message))
-        print("📤 Sent test message")
+        await websocket.send(json.dumps(start_message))
+        print("📤 Sent start event")
         
         # Try to receive response
         try:
             response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
             print(f"📥 Received: {response}")
         except asyncio.TimeoutError:
-            print("⏰ No response received (this is normal)")
+            print("⏰ No response received (this might be normal)")
+        
+        # Send some test audio data
+        audio_message = {
+            "type": "media",
+            "data": {
+                "samples": [100, 200, 150, 300] * 20  # Fake audio samples
+            }
+        }
+        
+        await websocket.send(json.dumps(audio_message))
+        print("📤 Sent test audio data")
         
         # Keep connection alive for a few seconds
         print("🔄 Keeping connection alive for 10 seconds...")
         await asyncio.sleep(10)
+        
+        # Send stop event
+        stop_message = {
+            "event": "stop",
+            "ucid": "test123"
+        }
+        
+        await websocket.send(json.dumps(stop_message))
+        print("📤 Sent stop event")
         
         await websocket.close()
         print("✅ Test completed successfully!")
@@ -81,10 +101,7 @@ if __name__ == "__main__":
         result = asyncio.run(test_websocket())
         if result:
             print("\n🎉 SUCCESS: WebSocket is working correctly!")
-            print("If Ozonetel still can't connect, the issue might be:")
-            print("1. Firewall blocking external connections")
-            print("2. Ozonetel's servers can't reach your IP")
-            print("3. XML response format issue")
+            print("If Ozonetel still can't connect, the issue is network/firewall related")
         else:
             print("\n❌ FAILED: WebSocket is not accessible")
             print("Check if your server is running and port 8000 is open")

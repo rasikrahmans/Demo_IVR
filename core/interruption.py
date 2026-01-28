@@ -51,10 +51,13 @@ class InterruptionManager:
     def set_agent_speaking(self, ucid: str, speaking: bool, reason: str = ""):
         """Set agent speaking state"""
         with self._lock:
-            if ucid in self._calls:
-                self._calls[ucid].is_agent_speaking = speaking
-                status = "🎤 SPEAKING" if speaking else "🔇 SILENT"
-                log.info(f"{status} - {ucid}: {reason}")
+            if ucid not in self._calls:
+                # Create call state if it doesn't exist
+                self._calls[ucid] = CallState(ucid=ucid)
+            
+            self._calls[ucid].is_agent_speaking = speaking
+            status = "🎤 SPEAKING" if speaking else "🔇 SILENT"
+            log.info(f"{status} - {ucid}: {reason}")
     
     def detect_interruption(self, ucid: str, transcript: str, confidence: float = 0.0) -> bool:
         """
@@ -113,9 +116,12 @@ class InterruptionManager:
     def clear_interruption(self, ucid: str):
         """Clear interruption flag"""
         with self._lock:
-            if ucid in self._calls:
-                self._calls[ucid].is_interrupted = False
-                log.info(f"🟢 Interruption cleared for {ucid}")
+            if ucid not in self._calls:
+                # Create call state if it doesn't exist
+                self._calls[ucid] = CallState(ucid=ucid)
+            
+            self._calls[ucid].is_interrupted = False
+            log.info(f"🟢 Interruption cleared for {ucid}")
     
     def set_interruption_callback(self, ucid: str, callback: Callable):
         """Set callback to be called when interruption is detected"""
