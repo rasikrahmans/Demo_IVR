@@ -227,126 +227,105 @@ class SarvamSTTService:
         except Exception as e:
             log.error(f"Error handling speech start: {e}")
     
-    def _extract_audio_bytes(self, audio_data) -> Optional[bytes]:
-        """Extract audio bytes from various formats"""
+    def _handle_speech_start_sync(self):
+        """Synchronous version for fallback mode"""
         try:
-            # Debug: Log the type and structure of audio_data
-            if hasattr(self, '_debug_count'):
-                self._debug_count += 1
-            else:
-                self._debug_count = 1
+            # Import here to avoid circular imports
+            from core.interruption import interruption_manager
             
-            # Log first few packets for debugging
-            if self._debug_count <= 5:
-                log.info(f"🔍 Debug #{self._debug_count} - audio_data type: {type(audio_data)}")
-                if isinstance(audio_data, dict):
-                    log.info(f"🔍 Debug #{self._debug_count} - dict keys: {list(audio_data.keys())}")
-                    log.info(f"🔍 Debug #{self._debug_count} - dict type: {audio_data.get('type', 'no_type')}")
-                    if 'data' in audio_data:
-                        log.info(f"🔍 Debug #{self._debug_count} - data type: {type(audio_data['data'])}")
-                        if isinstance(audio_data['data'], dict):
-                            log.info(f"🔍 Debug #{self._debug_count} - data keys: {list(audio_data['data'].keys())}")
-                elif isinstance(audio_data, str):
-                    log.info(f"🔍 Debug #{self._debug_count} - string length: {len(audio_data)}")
-                    log.info(f"🔍 Debug #{self._debug_count} - string preview: {audio_data[:100]}...")
+            # Check if agent is currently speaking
+            call_state = interruption_manager.get_call_state(self.current_ucid)
+            if call_state and call_state.is_agent_speaking:
+                log.info(f"🚨 SIMULATED INTERRUPTION for {self.current_ucid}")
+                self.interruptions_triggered += 1
+                
+                # Trigger interruption immediately (sync version)
+                interruption_manager.detect_interruption(
+                    self.current_ucid, 
+                    "customer_started_speaking_fallback", 
+                    confidence=0.85
+                )
+        except Exception as e:
+            log.error(f"Error in simulated speech start: {e}")
+    
+    def _extract_audio_bytes(self, audio_data) -> Optional[bytes]:
+        """
+        Extract and convert audio bytes from Ozonetel format to PCM
+        Based on working AssemblyAI implementation pattern
+        """
+        try:
+            import struct
             
-            audio_bytes = None
+            # Parse Ozonetel JSON format
+            if isinstance(audio_data, bytes):
+                audio_data = audio_data.decode('utf-8')
             
-            # Check if audio_data is already a dict (parsed JSON)
-            if isinstance(audio_data, dict):
-                json_data = audio_data
-            else:
-                # Try to parse as JSON string
+            if isinstance(audio_data, str):
                 try:
                     json_data = json.loads(audio_data)
                 except json.JSONDecodeError:
-                    # Raw data - try to decode
-                    try:
-                        if isinstance(audio_data, str):
-                            audio_bytes = base64.b64decode(audio_data)
-                        else:
-                            audio_bytes = bytes(audio_data)
-                    except:
-                        log.error(f"Failed to decode raw audio data: {type(audio_data)}")
-                        return None
-                    return audio_bytes if audio_bytes and len(audio_bytes) > 10 else None
-            
-            # Process JSON data - handle all possible structures
-            if json_data.get('type') == 'media':
-                # Try different possible structures
-                
-                # Structure 1: {"type": "media", "data": [1,2,3,4]}
-                if 'data' in json_data and isinstance(json_data['data'], list):
-                    audio_bytes = bytes(json_data['data'])
-                    if self._debug_count <= 3:
-                        log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data array")
-                
-                # Structure 2: {"type": "media", "data": {"samples": [1,2,3,4]}}
-                elif 'data' in json_data and isinstance(json_data['data'], dict):
-                    data_dict = json_data['data']
-                    if 'samples' in data_dict and isinstance(data_dict['samples'], list):
-                        audio_bytes = bytes(data_dict['samples'])
-                        if self._debug_count <= 3:
-                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data.samples array")
-                    elif 'payload' in data_dict:
-                        if isinstance(data_dict['payload'], str):
-                            audio_bytes = base64.b64decode(data_dict['payload'])
-                        elif isinstance(data_dict['payload'], list):
-                            audio_bytes = bytes(data_dict['payload'])
-                        if self._debug_count <= 3:
-                            log.info(f"🔍 Extracted {len(audio_bytes) if audio_bytes else 0} bytes from data.payload")
-                
-                # Structure 3: {"type": "media", "data": "base64string"}
-                elif 'data' in json_data and isinstance(json_data['data'], str):
-                    try:
-                        audio_bytes = base64.b64decode(json_data['data'])
-                        if self._debug_count <= 3:
-                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data base64 string")
-                    except:
-                        # Maybe it's not base64, try as raw bytes
-                        audio_bytes = json_data['data'].encode('latin-1')
-                        if self._debug_count <= 3:
-                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data raw string")
-                
-                # Structure 4: {"type": "media", "payload": "base64string"}
-                elif 'payload' in json_data:
-                    if isinstance(json_data['payload'], str):
-                        try:
-                            audio_bytes = base64.b64decode(json_data['payload'])
-                            if self._debug_count <= 3:
-                                log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload base64")
-                        except:
-                            audio_bytes = json_data['payload'].encode('latin-1')
-                            if self._debug_count <= 3:
-                                log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload raw")
-                    elif isinstance(json_data['payload'], list):
-                        audio_bytes = bytes(json_data['payload'])
-                        if self._debug_count <= 3:
-                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload array")
-                
-                else:
-                    if self._debug_count <= 3:
-                        log.warning(f"🔍 Media packet structure not recognized: {list(json_data.keys())}")
                     return None
             else:
-                # Not a media packet
-                if self._debug_count <= 3:
-                    log.info(f"🔍 Non-media packet: {json_data.get('type', 'unknown')}")
-                return None
+                json_data = audio_data
             
-            # Return audio bytes if we got some
-            if audio_bytes and len(audio_bytes) > 10:
-                return audio_bytes
-            else:
-                if self._debug_count <= 3:
-                    log.warning(f"🔍 No valid audio bytes extracted (length: {len(audio_bytes) if audio_bytes else 0})")
-                return None
+            # Extract 16-bit samples from Ozonetel format
+            if json_data.get('type') == 'media' and 'data' in json_data:
+                data_dict = json_data['data']
+                
+                # Handle different Ozonetel structures
+                samples = None
+                if isinstance(data_dict, dict) and 'samples' in data_dict:
+                    samples = data_dict['samples']
+                elif isinstance(data_dict, list):
+                    samples = data_dict
+                
+                if samples and isinstance(samples, list):
+                    # CRITICAL FIX: Convert 16-bit samples to proper PCM bytes
+                    # Ozonetel sends 16-bit signed integers (-32768 to 32767)
+                    # We need to convert them to bytes using struct.pack
+                    
+                    # Clamp samples to valid 16-bit range to prevent struct.pack errors
+                    clamped_samples = []
+                    for sample in samples:
+                        if isinstance(sample, (int, float)):
+                            # Clamp to 16-bit signed integer range
+                            clamped_sample = max(-32768, min(32767, int(sample)))
+                            clamped_samples.append(clamped_sample)
+                    
+                    if clamped_samples:
+                        # Convert to 16-bit PCM bytes (little-endian) - EXACTLY like AssemblyAI
+                        try:
+                            raw_audio = struct.pack(f'<{len(clamped_samples)}h', *clamped_samples)
+                            
+                            # Upsample from 8kHz to 16kHz for Sarvam compatibility
+                            # Simple linear interpolation like AssemblyAI implementation
+                            upsampled_samples = []
+                            for i in range(len(clamped_samples)):
+                                upsampled_samples.append(clamped_samples[i])
+                                # Add interpolated sample between current and next
+                                if i < len(clamped_samples) - 1:
+                                    interpolated = (clamped_samples[i] + clamped_samples[i + 1]) // 2
+                                    upsampled_samples.append(interpolated)
+                                else:
+                                    # For the last sample, duplicate it
+                                    upsampled_samples.append(clamped_samples[i])
+                            
+                            # Convert upsampled data to PCM bytes
+                            upsampled_audio = struct.pack(f'<{len(upsampled_samples)}h', *upsampled_samples)
+                            
+                            return upsampled_audio
+                            
+                        except struct.error as e:
+                            log.error(f"❌ struct.pack error: {e} - sample range issue")
+                            return None
+                        except Exception as e:
+                            log.error(f"❌ Audio conversion error: {e}")
+                            return None
+            
+            return None
             
         except Exception as e:
-            log.error(f"Error extracting audio bytes: {e}")
-            if self._debug_count <= 3:
-                import traceback
-                log.error(f"🔍 Full traceback: {traceback.format_exc()}")
+            log.error(f"❌ Error extracting audio bytes: {e}")
             return None
     
     def _run_fallback_mode(self):
@@ -363,27 +342,15 @@ class SarvamSTTService:
                     
                     self.total_audio_packets += 1
                     
+                    # Process audio to test conversion (but don't use result in fallback)
+                    audio_bytes = self._extract_audio_bytes(audio_data)
+                    if audio_bytes and self.total_audio_packets <= 3:
+                        log.info(f"✅ Audio conversion working: {len(audio_bytes)} bytes from packet #{self.total_audio_packets}")
+                    
                     # Simulate speech detection occasionally
                     if self.total_audio_packets % 50 == 0:  # Every 50 packets
-                        # Simulate speech start - but don't use asyncio.run in thread
-                        try:
-                            # Import here to avoid circular imports
-                            from core.interruption import interruption_manager
-                            
-                            # Check if agent is currently speaking
-                            call_state = interruption_manager.get_call_state(self.current_ucid)
-                            if call_state and call_state.is_agent_speaking:
-                                log.info(f"🚨 SIMULATED INTERRUPTION for {self.current_ucid}")
-                                self.interruptions_triggered += 1
-                                
-                                # Trigger interruption immediately (sync version)
-                                interruption_manager.detect_interruption(
-                                    self.current_ucid, 
-                                    "customer_started_speaking_fallback", 
-                                    confidence=0.85
-                                )
-                        except Exception as e:
-                            log.error(f"Error in simulated speech start: {e}")
+                        # Use synchronous version to avoid event loop issues
+                        self._handle_speech_start_sync()
                     
                     # Generate fake transcript occasionally for testing
                     if self.total_audio_packets % 150 == 0:  # Every 150 packets (~5 seconds)
