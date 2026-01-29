@@ -230,8 +230,6 @@ class SarvamSTTService:
     def _extract_audio_bytes(self, audio_data) -> Optional[bytes]:
         """Extract audio bytes from various formats"""
         try:
-            audio_bytes = None
-            
             # Debug: Log the type and structure of audio_data
             if hasattr(self, '_debug_count'):
                 self._debug_count += 1
@@ -239,11 +237,20 @@ class SarvamSTTService:
                 self._debug_count = 1
             
             # Log first few packets for debugging
-            if self._debug_count <= 3:
-                log.info(f"🔍 Debug audio_data type: {type(audio_data)}")
+            if self._debug_count <= 5:
+                log.info(f"🔍 Debug #{self._debug_count} - audio_data type: {type(audio_data)}")
                 if isinstance(audio_data, dict):
-                    log.info(f"🔍 Debug dict keys: {list(audio_data.keys())}")
-                    log.info(f"🔍 Debug dict type: {audio_data.get('type', 'no_type')}")
+                    log.info(f"🔍 Debug #{self._debug_count} - dict keys: {list(audio_data.keys())}")
+                    log.info(f"🔍 Debug #{self._debug_count} - dict type: {audio_data.get('type', 'no_type')}")
+                    if 'data' in audio_data:
+                        log.info(f"🔍 Debug #{self._debug_count} - data type: {type(audio_data['data'])}")
+                        if isinstance(audio_data['data'], dict):
+                            log.info(f"🔍 Debug #{self._debug_count} - data keys: {list(audio_data['data'].keys())}")
+                elif isinstance(audio_data, str):
+                    log.info(f"🔍 Debug #{self._debug_count} - string length: {len(audio_data)}")
+                    log.info(f"🔍 Debug #{self._debug_count} - string preview: {audio_data[:100]}...")
+            
+            audio_bytes = None
             
             # Check if audio_data is already a dict (parsed JSON)
             if isinstance(audio_data, dict):
@@ -253,41 +260,93 @@ class SarvamSTTService:
                 try:
                     json_data = json.loads(audio_data)
                 except json.JSONDecodeError:
-                    # Method 3: Raw base64 string
+                    # Raw data - try to decode
                     try:
-                        audio_bytes = base64.b64decode(audio_data)
+                        if isinstance(audio_data, str):
+                            audio_bytes = base64.b64decode(audio_data)
+                        else:
+                            audio_bytes = bytes(audio_data)
                     except:
-                        # Method 4: Raw binary data (if sent as string)
-                        if isinstance(audio_data, str) and len(audio_data) > 10:
-                            audio_bytes = audio_data.encode('latin-1')
+                        log.error(f"Failed to decode raw audio data: {type(audio_data)}")
+                        return None
                     return audio_bytes if audio_bytes and len(audio_bytes) > 10 else None
             
-            # Now process the JSON data
-            if json_data.get('type') == 'media' and 'payload' in json_data:
-                # Method 1: JSON with payload field
-                audio_payload = json_data['payload']
-                audio_bytes = base64.b64decode(audio_payload)
-                if self._debug_count <= 3:
-                    log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload field")
-            elif 'data' in json_data:
-                # Method 2: JSON with data field (array of bytes)
-                if isinstance(json_data['data'], list):
+            # Process JSON data - handle all possible structures
+            if json_data.get('type') == 'media':
+                # Try different possible structures
+                
+                # Structure 1: {"type": "media", "data": [1,2,3,4]}
+                if 'data' in json_data and isinstance(json_data['data'], list):
                     audio_bytes = bytes(json_data['data'])
                     if self._debug_count <= 3:
                         log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data array")
+                
+                # Structure 2: {"type": "media", "data": {"samples": [1,2,3,4]}}
+                elif 'data' in json_data and isinstance(json_data['data'], dict):
+                    data_dict = json_data['data']
+                    if 'samples' in data_dict and isinstance(data_dict['samples'], list):
+                        audio_bytes = bytes(data_dict['samples'])
+                        if self._debug_count <= 3:
+                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data.samples array")
+                    elif 'payload' in data_dict:
+                        if isinstance(data_dict['payload'], str):
+                            audio_bytes = base64.b64decode(data_dict['payload'])
+                        elif isinstance(data_dict['payload'], list):
+                            audio_bytes = bytes(data_dict['payload'])
+                        if self._debug_count <= 3:
+                            log.info(f"🔍 Extracted {len(audio_bytes) if audio_bytes else 0} bytes from data.payload")
+                
+                # Structure 3: {"type": "media", "data": "base64string"}
+                elif 'data' in json_data and isinstance(json_data['data'], str):
+                    try:
+                        audio_bytes = base64.b64decode(json_data['data'])
+                        if self._debug_count <= 3:
+                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data base64 string")
+                    except:
+                        # Maybe it's not base64, try as raw bytes
+                        audio_bytes = json_data['data'].encode('latin-1')
+                        if self._debug_count <= 3:
+                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data raw string")
+                
+                # Structure 4: {"type": "media", "payload": "base64string"}
+                elif 'payload' in json_data:
+                    if isinstance(json_data['payload'], str):
+                        try:
+                            audio_bytes = base64.b64decode(json_data['payload'])
+                            if self._debug_count <= 3:
+                                log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload base64")
+                        except:
+                            audio_bytes = json_data['payload'].encode('latin-1')
+                            if self._debug_count <= 3:
+                                log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload raw")
+                    elif isinstance(json_data['payload'], list):
+                        audio_bytes = bytes(json_data['payload'])
+                        if self._debug_count <= 3:
+                            log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload array")
+                
                 else:
-                    audio_bytes = base64.b64decode(json_data['data'])
                     if self._debug_count <= 3:
-                        log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data base64")
+                        log.warning(f"🔍 Media packet structure not recognized: {list(json_data.keys())}")
+                    return None
             else:
+                # Not a media packet
                 if self._debug_count <= 3:
-                    log.info(f"🔍 No audio payload found in JSON: {list(json_data.keys())}")
+                    log.info(f"🔍 Non-media packet: {json_data.get('type', 'unknown')}")
                 return None
             
-            return audio_bytes if audio_bytes and len(audio_bytes) > 10 else None
+            # Return audio bytes if we got some
+            if audio_bytes and len(audio_bytes) > 10:
+                return audio_bytes
+            else:
+                if self._debug_count <= 3:
+                    log.warning(f"🔍 No valid audio bytes extracted (length: {len(audio_bytes) if audio_bytes else 0})")
+                return None
             
         except Exception as e:
             log.error(f"Error extracting audio bytes: {e}")
+            if self._debug_count <= 3:
+                import traceback
+                log.error(f"🔍 Full traceback: {traceback.format_exc()}")
             return None
     
     def _run_fallback_mode(self):
