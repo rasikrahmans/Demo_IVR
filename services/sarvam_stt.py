@@ -173,37 +173,69 @@ class SarvamSTTService:
                 if self.stop_event.is_set():
                     break
                 
-                message_type = message.get("type", "")
+                # The message is a SpeechToTextStreamingResponse object, not a dict
+                # Let's check what attributes it has
+                try:
+                    # Try to access common attributes that streaming responses might have
+                    if hasattr(message, 'type'):
+                        message_type = message.type
+                    elif hasattr(message, 'event_type'):
+                        message_type = message.event_type
+                    elif hasattr(message, 'message_type'):
+                        message_type = message.message_type
+                    else:
+                        # If no type attribute, check if it has transcript directly
+                        message_type = "transcript"
+                    
+                    if message_type == "speech_start" or (hasattr(message, 'is_speech_start') and message.is_speech_start):
+                        # CRITICAL: Customer started speaking!
+                        self.speech_start_events += 1
+                        log.info(f"🎤 SPEECH START detected for {self.current_ucid}")
+                        
+                        # Check if agent is speaking - this is an interruption!
+                        await self._handle_speech_start()
+                        
+                    elif message_type == "speech_end" or (hasattr(message, 'is_speech_end') and message.is_speech_end):
+                        log.info(f"🔇 Speech ended for {self.current_ucid}")
+                        
+                    elif message_type == "transcript" or hasattr(message, 'transcript'):
+                        # Got actual transcript
+                        if hasattr(message, 'transcript'):
+                            transcript = message.transcript.strip() if message.transcript else ""
+                        elif hasattr(message, 'text'):
+                            transcript = message.text.strip() if message.text else ""
+                        else:
+                            transcript = str(message).strip()
+                        
+                        if hasattr(message, 'confidence'):
+                            confidence = message.confidence
+                        else:
+                            confidence = 0.8  # Default confidence
+                        
+                        if transcript:
+                            result = {
+                                'transcript': transcript,
+                                'confidence': confidence,
+                                'is_final': True,
+                                'provider': 'sarvam_streaming'
+                            }
+                            self.result_queue.put(result)
+                            self.processed_transcripts += 1
+                            log.info(f"📝 Sarvam transcript: '{transcript}' (confidence: {confidence:.2f})")
+                    
+                    else:
+                        # Log unknown message type for debugging
+                        log.debug(f"🔍 Unknown Sarvam message type: {message_type}, message: {message}")
                 
-                if message_type == "speech_start":
-                    # CRITICAL: Customer started speaking!
-                    self.speech_start_events += 1
-                    log.info(f"🎤 SPEECH START detected for {self.current_ucid}")
-                    
-                    # Check if agent is speaking - this is an interruption!
-                    await self._handle_speech_start()
-                    
-                elif message_type == "speech_end":
-                    log.info(f"🔇 Speech ended for {self.current_ucid}")
-                    
-                elif message_type == "transcript":
-                    # Got actual transcript
-                    transcript = message.get("text", "").strip()
-                    confidence = message.get("confidence", 0.8)
-                    
-                    if transcript:
-                        result = {
-                            'transcript': transcript,
-                            'confidence': confidence,
-                            'is_final': True,
-                            'provider': 'sarvam_streaming'
-                        }
-                        self.result_queue.put(result)
-                        self.processed_transcripts += 1
-                        log.info(f"📝 Sarvam transcript: '{transcript}' (confidence: {confidence:.2f})")
+                except Exception as attr_error:
+                    # If we can't parse the message properly, log it and continue
+                    log.error(f"Error parsing Sarvam message: {attr_error}")
+                    log.debug(f"Message object: {message}")
+                    log.debug(f"Message attributes: {dir(message)}")
                 
         except Exception as e:
             log.error(f"Error handling streaming responses: {e}")
+            log.debug(f"Exception details: {type(e).__name__}: {str(e)}")
     
     async def _handle_speech_start(self):
         """Handle speech start event - check for interruption"""
