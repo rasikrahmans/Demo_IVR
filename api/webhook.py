@@ -384,12 +384,13 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
                     elif json_data.get('event') == 'start':
                         log.info(f"📞 Call started - UCID: {ucid}")
                         continue
+                    
+                    # Send parsed JSON to STT service
+                    audio_queue.put(json_data)
                         
                 except json.JSONDecodeError:
-                    pass
-                
-                # Send audio to STT service
-                audio_queue.put(text_data)
+                    # If JSON parsing fails, send the raw text_data
+                    audio_queue.put(text_data)
             else:
                 log.warning(f"📭 Received WebSocket data without 'text' field: {data}")
                 

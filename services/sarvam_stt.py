@@ -227,33 +227,62 @@ class SarvamSTTService:
         except Exception as e:
             log.error(f"Error handling speech start: {e}")
     
-    def _extract_audio_bytes(self, audio_data: str) -> Optional[bytes]:
+    def _extract_audio_bytes(self, audio_data) -> Optional[bytes]:
         """Extract audio bytes from various formats"""
         try:
             audio_bytes = None
             
-            # Try multiple ways to extract audio data
-            try:
-                # Method 1: JSON with payload field
-                json_data = json.loads(audio_data)
-                if json_data.get('type') == 'media' and 'payload' in json_data:
-                    audio_payload = json_data['payload']
-                    audio_bytes = base64.b64decode(audio_payload)
-                elif 'data' in json_data:
-                    # Method 2: JSON with data field (array of bytes)
-                    if isinstance(json_data['data'], list):
-                        audio_bytes = bytes(json_data['data'])
-                    else:
-                        audio_bytes = base64.b64decode(json_data['data'])
-                        
-            except json.JSONDecodeError:
-                # Method 3: Raw base64 string
+            # Debug: Log the type and structure of audio_data
+            if hasattr(self, '_debug_count'):
+                self._debug_count += 1
+            else:
+                self._debug_count = 1
+            
+            # Log first few packets for debugging
+            if self._debug_count <= 3:
+                log.info(f"🔍 Debug audio_data type: {type(audio_data)}")
+                if isinstance(audio_data, dict):
+                    log.info(f"🔍 Debug dict keys: {list(audio_data.keys())}")
+                    log.info(f"🔍 Debug dict type: {audio_data.get('type', 'no_type')}")
+            
+            # Check if audio_data is already a dict (parsed JSON)
+            if isinstance(audio_data, dict):
+                json_data = audio_data
+            else:
+                # Try to parse as JSON string
                 try:
-                    audio_bytes = base64.b64decode(audio_data)
-                except:
-                    # Method 4: Raw binary data (if sent as string)
-                    if isinstance(audio_data, str) and len(audio_data) > 10:
-                        audio_bytes = audio_data.encode('latin-1')
+                    json_data = json.loads(audio_data)
+                except json.JSONDecodeError:
+                    # Method 3: Raw base64 string
+                    try:
+                        audio_bytes = base64.b64decode(audio_data)
+                    except:
+                        # Method 4: Raw binary data (if sent as string)
+                        if isinstance(audio_data, str) and len(audio_data) > 10:
+                            audio_bytes = audio_data.encode('latin-1')
+                    return audio_bytes if audio_bytes and len(audio_bytes) > 10 else None
+            
+            # Now process the JSON data
+            if json_data.get('type') == 'media' and 'payload' in json_data:
+                # Method 1: JSON with payload field
+                audio_payload = json_data['payload']
+                audio_bytes = base64.b64decode(audio_payload)
+                if self._debug_count <= 3:
+                    log.info(f"🔍 Extracted {len(audio_bytes)} bytes from payload field")
+            elif 'data' in json_data:
+                # Method 2: JSON with data field (array of bytes)
+                if isinstance(json_data['data'], list):
+                    audio_bytes = bytes(json_data['data'])
+                    if self._debug_count <= 3:
+                        log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data array")
+                else:
+                    audio_bytes = base64.b64decode(json_data['data'])
+                    if self._debug_count <= 3:
+                        log.info(f"🔍 Extracted {len(audio_bytes)} bytes from data base64")
+            else:
+                if self._debug_count <= 3:
+                    log.info(f"🔍 No audio payload found in JSON: {list(json_data.keys())}")
+                return None
             
             return audio_bytes if audio_bytes and len(audio_bytes) > 10 else None
             
