@@ -78,8 +78,10 @@ class SarvamSTTService:
             # Import Sarvam client
             try:
                 from sarvamai import AsyncSarvamAI
+                log.info("✅ Sarvam AI package loaded successfully")
             except ImportError:
-                log.error("sarvamai package not installed. Install with: pip install sarvamai")
+                log.error("❌ sarvamai package not installed. Falling back to simple mode.")
+                log.error("   To fix: pip install sarvamai")
                 self._run_fallback_mode()
                 return
             
@@ -275,11 +277,28 @@ class SarvamSTTService:
                     
                     # Simulate speech detection occasionally
                     if self.total_audio_packets % 50 == 0:  # Every 50 packets
-                        # Simulate speech start
-                        asyncio.run(self._handle_speech_start())
+                        # Simulate speech start - but don't use asyncio.run in thread
+                        try:
+                            # Import here to avoid circular imports
+                            from core.interruption import interruption_manager
+                            
+                            # Check if agent is currently speaking
+                            call_state = interruption_manager.get_call_state(self.current_ucid)
+                            if call_state and call_state.is_agent_speaking:
+                                log.info(f"🚨 SIMULATED INTERRUPTION for {self.current_ucid}")
+                                self.interruptions_triggered += 1
+                                
+                                # Trigger interruption immediately (sync version)
+                                interruption_manager.detect_interruption(
+                                    self.current_ucid, 
+                                    "customer_started_speaking_fallback", 
+                                    confidence=0.85
+                                )
+                        except Exception as e:
+                            log.error(f"Error in simulated speech start: {e}")
                     
-                    # Generate fake transcript occasionally
-                    if self.total_audio_packets % 200 == 0:
+                    # Generate fake transcript occasionally for testing
+                    if self.total_audio_packets % 150 == 0:  # Every 150 packets (~5 seconds)
                         fake_responses = [
                             "Hello, I want to track my package",
                             "I need to check my order status", 
@@ -297,6 +316,11 @@ class SarvamSTTService:
                         }
                         self.result_queue.put(fake_transcript)
                         self.processed_transcripts += 1
+                        log.info(f"📝 Fallback transcript: '{fake_transcript['transcript']}'")
+                    
+                    # Log progress occasionally
+                    if self.total_audio_packets % 500 == 1:
+                        log.info(f"📊 Fallback STT Stats: packets={self.total_audio_packets}, transcripts={self.processed_transcripts}")
                     
                 except queue.Empty:
                     continue
