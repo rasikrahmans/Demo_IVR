@@ -21,8 +21,6 @@ class SarvamTTSService:
         
         if not self.enabled:
             log.warning("Sarvam API key not configured - TTS will be simulated")
-        else:
-            log.info(f"Sarvam TTS Service initialized")
     
     def generate_speech(self, text: str, language_code: str = "en-IN") -> Optional[bytes]:
         """Generate speech audio from text
@@ -64,7 +62,7 @@ class SarvamTTSService:
                 "model": "bulbul:v2"
             }
             
-            log.debug(f"🎤 Generating TTS: '{text[:30]}...' (speaker: abhilash)")
+            log.debug(f"🎤 Generating TTS: '{text[:30]}...'")
             
             response = requests.post(
                 self.base_url,
@@ -83,7 +81,6 @@ class SarvamTTSService:
                     import base64
                     audio_bytes = base64.b64decode(audio_base64)
                     
-                    log.info(f"✅ TTS generated: {len(audio_bytes)} bytes")
                     return audio_bytes
                 else:
                     log.error("No audio data in Sarvam response")

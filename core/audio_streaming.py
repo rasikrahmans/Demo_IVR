@@ -41,8 +41,8 @@ class AudioStreamer:
             else:
                 raw_audio = audio_data
             
-            # Use optimal chunk size for quality vs responsiveness balance
-            CHUNK_SIZE = 3200  # 100ms chunks at 16kHz (1600 samples * 2 bytes)
+            # Use smaller chunk size for better interruption responsiveness
+            CHUNK_SIZE = 1600  # 50ms chunks at 16kHz (800 samples * 2 bytes) - more responsive
             
             total_chunks = (len(raw_audio) + CHUNK_SIZE - 1) // CHUNK_SIZE
             sent_chunks = 0
@@ -70,8 +70,8 @@ class AudioStreamer:
                     await websocket.send_text(json.dumps(audio_message))
                     sent_chunks += 1
                     
-                    # Small delay for interruption responsiveness
-                    await asyncio.sleep(0.005)  # 5ms delay
+                    # Smaller delay for better interruption responsiveness
+                    await asyncio.sleep(0.002)  # 2ms delay - more responsive to interruptions
                     
                 except Exception as e:
                     log.error(f"Error sending audio chunk {sent_chunks+1}: {e}")

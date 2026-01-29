@@ -24,7 +24,7 @@ class ParcelTrackingAgent:
     """
     
     def __init__(self):
-        log.info("✅ Parcel tracking agent initialized with fallback responses")
+        pass  # Simplified initialization
     
     def generate_greeting_response(self) -> str:
         """Generate a natural greeting"""

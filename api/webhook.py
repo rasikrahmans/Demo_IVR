@@ -120,36 +120,28 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
     
     # Initialize services with error handling
     try:
-        log.info("🔧 Initializing STT service...")
         stt_service = SarvamSTTService()
-        log.info("✅ STT service initialized")
     except Exception as e:
         log.error(f"❌ STT service failed: {e}")
         await websocket.close()
         return
     
     try:
-        log.info("🔧 Initializing TTS service...")
         tts_service = SarvamTTSService()
-        log.info("✅ TTS service initialized")
     except Exception as e:
         log.error(f"❌ TTS service failed: {e}")
         await websocket.close()
         return
     
     try:
-        log.info("🔧 Initializing conversation agent...")
         conversation_agent = ParcelTrackingAgent()
-        log.info("✅ Conversation agent initialized")
     except Exception as e:
         log.error(f"❌ Conversation agent failed: {e}")
         await websocket.close()
         return
     
     try:
-        log.info("🔧 Initializing Ozonetel service...")
         ozonetel_service = OzonetelService()
-        log.info("✅ Ozonetel service initialized")
     except Exception as e:
         log.error(f"❌ Ozonetel service failed: {e}")
         await websocket.close()
@@ -178,7 +170,6 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
     
     # Clear any stale interruption flags from previous calls
     interruption_manager.clear_interruption(ucid)
-    log.info(f"🧹 Cleared any stale interruption flags for new call {ucid}")
     
     # Send initial greeting
     greeting_message = conversation_agent.generate_greeting_response()
@@ -224,14 +215,22 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
                 # Check for interruption
                 if interruption_manager.detect_interruption(ucid, transcript, confidence):
                     log.info(f"🚨 INTERRUPTION DETECTED! Transcript: '{transcript}'")
-                    # Stop any current audio
+                    
+                    # IMMEDIATELY stop any current audio playback
                     try:
+                        # Use emergency stop for immediate response
+                        await AudioStreamer.emergency_stop_audio(ucid)
                         await ozonetel_service.stop_audio_playback(ucid)
                     except Exception as e:
                         log.error(f"Error stopping audio: {e}")
-                    continue
-                
-                log.info(f"📝 Customer: '{transcript}' (confidence: {confidence:.2f})")
+                    
+                    # Clear interruption flag and continue processing this speech
+                    interruption_manager.clear_interruption(ucid)
+                    
+                    # Process the interrupting speech normally
+                    log.info(f"📝 Processing interrupting speech: '{transcript}'")
+                else:
+                    log.info(f"📝 Customer: '{transcript}' (confidence: {confidence:.2f})")
                 
                 # Analyze customer input
                 analysis = conversation_agent.analyze_customer_input(transcript, conversation_state)
@@ -373,10 +372,10 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
                         if not hasattr(websocket_endpoint, '_media_count'):
                             websocket_endpoint._media_count = 0
                         websocket_endpoint._media_count += 1
-                        # Only log every 500th packet instead of every 100th
-                        if websocket_endpoint._media_count % 500 == 1:
+                        # Only log every 1000th packet to reduce noise
+                        if websocket_endpoint._media_count % 1000 == 1:
                             log.info(f"📋 Media packet #{websocket_endpoint._media_count}")
-                    else:
+                    elif json_data.get('type') not in ['media']:
                         log.info(f"📋 Non-media packet: type={json_data.get('type', 'unknown')}")
                     
                     if json_data.get('event') == 'stop':
@@ -405,8 +404,6 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
         try:
             caller_phone = call_sessions.get(ucid, {}).get('caller_id')
             termination_success = await ozonetel_service.hangup_call(ucid, caller_phone)
-            if termination_success:
-                log.info(f"✅ Call {ucid} terminated via Ozonetel")
         except Exception as e:
             log.warning(f"⚠️ Error terminating call {ucid}: {e}")
         
@@ -429,8 +426,6 @@ async def websocket_endpoint(websocket: WebSocket, ucid: str = None, cid: str = 
         if ucid in call_sessions:
             call_sessions[ucid]['status'] = 'completed'
             call_sessions[ucid]['end_time'] = datetime.now().isoformat()
-        
-        log.info(f"✅ Cleanup completed for UCID: {ucid}")
 
 @app.get("/health")
 async def health_check():
